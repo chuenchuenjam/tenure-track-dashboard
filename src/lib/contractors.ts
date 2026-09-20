@@ -89,7 +89,8 @@ export type ParsedSheet = { headers: string[]; rows: Record<string, unknown>[] }
 export async function readSheet(file: File): Promise<ParsedSheet> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const sheet = wb.Sheets[wb.SheetNames[0] ?? ""];
+  if (!sheet) return { headers: [], rows: [] };
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: false });
   const headerRow = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: false })[0] ?? [];
   const headers = headerRow.map((h) => String(h ?? "").trim()).filter(Boolean);
@@ -140,7 +141,9 @@ export function toISODate(value: unknown): string | null {
   // dd/mm/yyyy or mm/dd/yyyy — assume day first when the first part > 12
   const m = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (m) {
-    let [, a, b, y] = m;
+    const a = m[1] ?? "";
+    const b = m[2] ?? "";
+    const y = m[3] ?? "";
     let day = Number(a);
     let month = Number(b);
     if (day <= 12 && month > 12) {
