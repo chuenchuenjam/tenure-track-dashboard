@@ -14,7 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      contractors: {
+        Row: {
+          addis_status: string | null
+          country: string | null
+          created_at: string
+          department: string | null
+          email: string | null
+          function: string | null
+          id: string
+          manager: string | null
+          name: string
+          notes: string | null
+          sow_end_date: string | null
+          sow_name: string | null
+          sow_start_date: string | null
+          termination_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          addis_status?: string | null
+          country?: string | null
+          created_at?: string
+          department?: string | null
+          email?: string | null
+          function?: string | null
+          id?: string
+          manager?: string | null
+          name: string
+          notes?: string | null
+          sow_end_date?: string | null
+          sow_name?: string | null
+          sow_start_date?: string | null
+          termination_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          addis_status?: string | null
+          country?: string | null
+          created_at?: string
+          department?: string | null
+          email?: string | null
+          function?: string | null
+          id?: string
+          manager?: string | null
+          name?: string
+          notes?: string | null
+          sow_end_date?: string | null
+          sow_name?: string | null
+          sow_start_date?: string | null
+          termination_date?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
