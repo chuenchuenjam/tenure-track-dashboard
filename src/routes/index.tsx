@@ -539,7 +539,9 @@ function FilterSelect({
   return (
     <Select value={value} onValueChange={onChange as (v: string) => void}>
       <SelectTrigger className="w-[150px]">
-        <SelectValue placeholder={placeholder} />
+        <SelectValue placeholder={placeholder}>
+          {value === ALL ? `All ${placeholder.toLowerCase()}` : value}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={ALL}>All {placeholder.toLowerCase()}</SelectItem>
