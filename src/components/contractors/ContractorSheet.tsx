@@ -15,6 +15,10 @@ const empty: ContractorInput = {
   department: null,
   function: null,
   country: null,
+  vendor: null,
+  monthly_rate: null,
+  currency: null,
+  renewal_count: 0,
   sow_name: null,
   sow_start_date: null,
   sow_end_date: null,
@@ -49,7 +53,10 @@ export function ContractorSheet({
   }, [contractor, open]);
 
   const set = (key: keyof ContractorInput, value: string) =>
-    setForm((f) => ({ ...f, [key]: value === "" ? null : value }));
+    setForm((f) => ({
+      ...f,
+      [key]: value === "" ? (key === "renewal_count" ? 0 : null) : value,
+    }));
 
   async function save() {
     if (!form.name?.trim()) {
@@ -104,8 +111,10 @@ export function ContractorSheet({
               <Label htmlFor={f.key}>{f.label}</Label>
               <Input
                 id={f.key}
-                type={f.type === "date" ? "date" : "text"}
-                value={(form[f.key] as string | null) ?? ""}
+                type={f.type === "date" ? "date" : f.type === "number" ? "number" : "text"}
+                step={f.key === "monthly_rate" ? "0.01" : undefined}
+                min={f.type === "number" ? 0 : undefined}
+                value={((form[f.key] as string | number | null) ?? "") as string | number}
                 onChange={(e) => set(f.key, e.target.value)}
               />
             </div>

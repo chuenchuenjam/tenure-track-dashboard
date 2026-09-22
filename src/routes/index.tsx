@@ -5,6 +5,8 @@ import {
   Bar,
   BarChart,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -12,7 +14,18 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Download, Plus, Upload, Users, ShieldCheck, CalendarClock, AlertTriangle, X, Search } from "lucide-react";
+import {
+  Download,
+  Plus,
+  Upload,
+  Users,
+  ShieldCheck,
+  CalendarClock,
+  AlertTriangle,
+  Wallet,
+  X,
+  Search,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,9 +80,13 @@ const CHART_COLORS = [
 
 type Drill = { label: string; test: (c: Contractor) => boolean } | null;
 
+const fmtMoney = (n: number, currency = "USD") =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+
 function Kpi({
   label,
   value,
+  valueText,
   icon: Icon,
   tone,
   active,
@@ -77,6 +94,7 @@ function Kpi({
 }: {
   label: string;
   value: number;
+  valueText?: string;
   icon: typeof Users;
   tone: string;
   active: boolean;
@@ -95,7 +113,7 @@ function Kpi({
           <Icon className="size-4" />
         </span>
       </div>
-      <p className="mt-3 text-3xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-3 text-3xl font-semibold tabular-nums">{valueText ?? value}</p>
       <p className="mt-1 text-xs text-muted-foreground">Click to view the list</p>
     </button>
   );
@@ -110,6 +128,7 @@ function Dashboard() {
   const [department, setDepartment] = useState<string>(ALL);
   const [fn, setFn] = useState<string>(ALL);
   const [country, setCountry] = useState<string>(ALL);
+  const [vendor, setVendor] = useState<string>(ALL);
   const [drill, setDrill] = useState<Drill>(null);
 
   const { data: contractors = [], refetch } = useQuery({
@@ -135,10 +154,11 @@ function Dashboard() {
       if (department !== ALL && (c.department ?? "") !== department) return false;
       if (fn !== ALL && (c.function ?? "") !== fn) return false;
       if (country !== ALL && (c.country ?? "") !== country) return false;
+      if (vendor !== ALL && (c.vendor ?? "") !== vendor) return false;
       if (drill && !drill.test(c)) return false;
       return true;
     });
-  }, [contractors, search, status, department, fn, country, drill]);
+  }, [contractors, search, status, department, fn, country, vendor, drill]);
 
   const stats = useMemo(() => {
     let active = 0;
@@ -151,6 +171,23 @@ function Dashboard() {
       if (needsAttention(c)) attention += 1;
     }
     return { total: contractors.length, active, expiring, attention };
+  }, [contractors]);
+
+  /** Current monthly spend: Active + Expiring contractors with a rate. */
+  const spend = useMemo(() => {
+    const withRate = contractors.filter(
+      (c) => ["Active", "Expiring"].includes(getStatus(c)) && c.monthly_rate != null,
+    );
+    const curCount = new Map<string, number>();
+    for (const c of withRate) {
+      const cu = (c.currency ?? "USD").toUpperCase();
+      curCount.set(cu, (curCount.get(cu) ?? 0) + 1);
+    }
+    const currency = [...curCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "USD";
+    const total = withRate
+      .filter((c) => (c.currency ?? "USD").toUpperCase() === currency)
+      .reduce((sum, c) => sum + (c.monthly_rate ?? 0), 0);
+    return { total, currency, mixed: curCount.size > 1 };
   }, [contractors]);
 
   const byTerminationYear = useMemo(() => {
@@ -175,6 +212,49 @@ function Dashboard() {
   const byFunction = useMemo(() => groupBy("function"), [contractors]);
   const byCountry = useMemo(() => groupBy("country"), [contractors]);
 
+  const byVendorSpend = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of contractors) {
+      if (!["Active", "Expiring"].includes(getStatus(c))) continue;
+      const k = (c.vendor ?? "").trim() || "Unspecified";
+      m.set(k, (m.get(k) ?? 0) + (c.monthly_rate ?? 0));
+    }
+    return Array.from(m, ([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [contractors]);
+
+  /** Active headcount at each of the last 12 months, derived from SoW dates. */
+  const headcountTrend = useMemo(() => {
+    const out: { month: string; count: number }[] = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 1));
+      const monthStart = start.toISOString().slice(0, 10);
+      const monthEnd = end.toISOString().slice(0, 10);
+      const count = contractors.filter((c) => {
+        const st = c.sow_start_date ?? "";
+        const se = c.sow_end_date ?? "";
+        const t = c.termination_date ?? "";
+        if (st && st >= monthEnd) return false; // started after this month
+        if (se && se < monthStart) return false; // SoW ended before this month
+        if (t && t < monthEnd) return false; // terminated during/before this month
+        return true;
+      }).length;
+      out.push({ month: monthStart.slice(0, 7), count });
+    }
+    return out;
+  }, [contractors]);
+
+  const renewalQueue = useMemo(
+    () =>
+      contractors
+        .filter((c) => getStatus(c) === "Expiring")
+        .sort((a, b) => (a.sow_end_date ?? "").localeCompare(b.sow_end_date ?? "")),
+    [contractors],
+  );
+
   const expiryByMonth = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of contractors) {
@@ -192,11 +272,12 @@ function Dashboard() {
     setDepartment(ALL);
     setFn(ALL);
     setCountry(ALL);
+    setVendor(ALL);
     setDrill(null);
   };
 
   const hasFilters =
-    search || status !== ALL || department !== ALL || fn !== ALL || country !== ALL || Boolean(drill);
+    search || status !== ALL || department !== ALL || fn !== ALL || country !== ALL || vendor !== ALL || Boolean(drill);
 
   const openRow = (c: Contractor | null) => {
     setEditing(c);
@@ -235,7 +316,7 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Kpi
             label="Total contractors"
             value={stats.total}
@@ -277,9 +358,87 @@ function Dashboard() {
               setDrill({ label: "SoW ended, still in system", test: needsAttention });
             }}
           />
+          <Kpi
+            label="Monthly spend (active)"
+            value={stats.active}
+            valueText={fmtMoney(spend.total, spend.currency) + (spend.mixed ? "+" : "")}
+            icon={Wallet}
+            tone="bg-sky-500/15 text-sky-600"
+            active={drill?.label === "Active contractors"}
+            onClick={() => {
+              setStatus(ALL);
+              setDrill({
+                label: "Active contractors",
+                test: (c) => ["Active", "Expiring"].includes(getStatus(c)),
+              });
+            }}
+          />
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Headcount trend — last 12 months</CardTitle>
+            </CardHeader>
+            <CardContent className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={headcountTrend}>
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={11} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} width={28} />
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="count"
+                    stroke="var(--color-chart-1)"
+                    strokeWidth={2.5}
+                    dot={{ r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Monthly spend by vendor</CardTitle>
+            </CardHeader>
+            <CardContent className="h-64">
+              {byVendorSpend.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={byVendorSpend} layout="vertical" margin={{ left: 12 }}>
+                    <XAxis
+                      type="number"
+                      tickLine={false}
+                      axisLine={false}
+                      fontSize={12}
+                      tickFormatter={(v: number) => fmtMoney(v, spend.currency)}
+                    />
+                    <YAxis type="category" dataKey="name" width={120} tickLine={false} axisLine={false} fontSize={12} />
+                    <Tooltip
+                      cursor={{ fill: "var(--color-muted)" }}
+                      formatter={(v) => fmtMoney(Number(v), spend.currency)}
+                    />
+                    <Bar
+                      dataKey="value"
+                      radius={[0, 6, 6, 0]}
+                      fill="var(--color-chart-3)"
+                      className="cursor-pointer"
+                      onClick={(d: { name?: string }) =>
+                        d.name &&
+                        setDrill({
+                          label: `Vendor: ${d.name}`,
+                          test: (c) => ((c.vendor ?? "Unspecified").trim() || "Unspecified") === d.name,
+                        })
+                      }
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Empty />
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Terminations by year</CardTitle>
@@ -415,6 +574,81 @@ function Dashboard() {
           </Card>
         </section>
 
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="text-base">
+                Renewal queue — next {EXPIRY_WINDOW_DAYS} days{" "}
+                <Badge variant="secondary" className="ml-1">
+                  {renewalQueue.length}
+                </Badge>
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                SoWs ending soon, sorted by date. Click a person to update dates, rate or vendor.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportToExcel(renewalQueue, "renewal-queue.xlsx")}
+              disabled={!renewalQueue.length}
+            >
+              <Download className="size-4" /> Export queue
+            </Button>
+          </CardHeader>
+          <CardContent className="px-0 pb-0">
+            {renewalQueue.length ? (
+              <div className="max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead>Manager</TableHead>
+                      <TableHead>SoW end</TableHead>
+                      <TableHead>Monthly rate</TableHead>
+                      <TableHead>Renewals</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {renewalQueue.map((c) => {
+                      const d = daysUntil(c.sow_end_date);
+                      return (
+                        <TableRow key={c.id} className="cursor-pointer" onClick={() => openRow(c)}>
+                          <TableCell>
+                            <span className="font-medium">{c.name}</span>
+                            {c.email && (
+                              <span className="block text-xs text-muted-foreground">{c.email}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{c.vendor ?? "—"}</TableCell>
+                          <TableCell className="text-muted-foreground">{c.manager ?? "—"}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {c.sow_end_date ?? "—"}
+                            {d !== null && (
+                              <span className="block text-xs text-amber-600">in {d} days</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {c.monthly_rate != null ? fmtMoney(c.monthly_rate, c.currency ?? "USD") : "—"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {c.renewal_count > 0 ? `×${c.renewal_count}` : "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                Nothing expiring in the next {EXPIRY_WINDOW_DAYS} days.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <section className="rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center gap-3 border-b border-border p-4">
             <div className="relative min-w-52 flex-1">
@@ -430,6 +664,7 @@ function Dashboard() {
             <FilterSelect value={department} onChange={setDepartment} placeholder="Department" options={uniq("department")} />
             <FilterSelect value={fn} onChange={setFn} placeholder="Function" options={uniq("function")} />
             <FilterSelect value={country} onChange={setCountry} placeholder="Country" options={uniq("country")} />
+            <FilterSelect value={vendor} onChange={setVendor} placeholder="Vendor" options={uniq("vendor")} />
             {hasFilters && (
               <Button variant="ghost" size="sm" onClick={clearFilters}>
                 <X className="size-4" /> Clear
@@ -454,8 +689,11 @@ function Dashboard() {
                   <TableHead>Department</TableHead>
                   <TableHead>Function</TableHead>
                   <TableHead>Country</TableHead>
+                  <TableHead>Vendor</TableHead>
+                  <TableHead>Rate</TableHead>
                   <TableHead>SoW end</TableHead>
                   <TableHead>Termination</TableHead>
+                  <TableHead>Renewals</TableHead>
                   <TableHead>ADDIS</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
@@ -478,6 +716,10 @@ function Dashboard() {
                       <TableCell className="text-muted-foreground">{c.department ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{c.function ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{c.country ?? "—"}</TableCell>
+                      <TableCell className="text-muted-foreground">{c.vendor ?? "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap tabular-nums">
+                        {c.monthly_rate != null ? fmtMoney(c.monthly_rate, c.currency ?? "USD") : "—"}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {c.sow_end_date ?? "—"}
                         {d !== null && d >= 0 && d <= EXPIRY_WINDOW_DAYS && (
@@ -486,6 +728,9 @@ function Dashboard() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {c.termination_date ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {c.renewal_count > 0 ? `×${c.renewal_count}` : "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">{c.addis_status ?? "—"}</TableCell>
                       <TableCell>
@@ -498,7 +743,7 @@ function Dashboard() {
                 })}
                 {!filtered.length && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-14 text-center text-muted-foreground">
+                    <TableCell colSpan={11} className="py-14 text-center text-muted-foreground">
                       {contractors.length
                         ? "No contractors match these filters."
                         : "No data yet — upload your contractor Excel file to get started."}
