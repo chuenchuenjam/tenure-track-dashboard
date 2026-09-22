@@ -19,52 +19,64 @@ export type Database = {
           addis_status: string | null
           country: string | null
           created_at: string
+          currency: string | null
           department: string | null
           email: string | null
           function: string | null
           id: string
           manager: string | null
+          monthly_rate: number | null
           name: string
           notes: string | null
+          renewal_count: number
           sow_end_date: string | null
           sow_name: string | null
           sow_start_date: string | null
           termination_date: string | null
           updated_at: string
+          vendor: string | null
         }
         Insert: {
           addis_status?: string | null
           country?: string | null
           created_at?: string
+          currency?: string | null
           department?: string | null
           email?: string | null
           function?: string | null
           id?: string
           manager?: string | null
+          monthly_rate?: number | null
           name: string
           notes?: string | null
+          renewal_count?: number
           sow_end_date?: string | null
           sow_name?: string | null
           sow_start_date?: string | null
           termination_date?: string | null
           updated_at?: string
+          vendor?: string | null
         }
         Update: {
           addis_status?: string | null
           country?: string | null
           created_at?: string
+          currency?: string | null
           department?: string | null
           email?: string | null
           function?: string | null
           id?: string
           manager?: string | null
+          monthly_rate?: number | null
           name?: string
           notes?: string | null
+          renewal_count?: number
           sow_end_date?: string | null
           sow_name?: string | null
           sow_start_date?: string | null
           termination_date?: string | null
           updated_at?: string
+          vendor?: string | null
         }
         Relationships: []
       }
