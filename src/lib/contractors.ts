@@ -7,6 +7,10 @@ export type Contractor = {
   department: string | null;
   function: string | null;
   country: string | null;
+  vendor: string | null;
+  monthly_rate: number | null;
+  currency: string | null;
+  renewal_count: number;
   sow_name: string | null;
   sow_start_date: string | null;
   sow_end_date: string | null;
@@ -24,16 +28,20 @@ export type Status = "Terminated" | "Expired" | "Expiring" | "Active";
 
 export const EXPIRY_WINDOW_DAYS = 180;
 
-export const FIELDS: { key: keyof ContractorInput; label: string; type: "text" | "date" }[] = [
+export const FIELDS: { key: keyof ContractorInput; label: string; type: "text" | "date" | "number" }[] = [
   { key: "name", label: "Name", type: "text" },
   { key: "email", label: "Email", type: "text" },
   { key: "department", label: "Department", type: "text" },
   { key: "function", label: "Function", type: "text" },
   { key: "country", label: "Country", type: "text" },
+  { key: "vendor", label: "Vendor", type: "text" },
   { key: "sow_name", label: "SoW Name", type: "text" },
   { key: "sow_start_date", label: "SoW Start Date", type: "date" },
   { key: "sow_end_date", label: "SoW End Date", type: "date" },
   { key: "termination_date", label: "Termination Date", type: "date" },
+  { key: "monthly_rate", label: "Monthly Rate", type: "number" },
+  { key: "currency", label: "Currency", type: "text" },
+  { key: "renewal_count", label: "Renewals", type: "number" },
   { key: "addis_status", label: "ADDIS Status", type: "text" },
   { key: "manager", label: "Manager", type: "text" },
   { key: "notes", label: "Notes", type: "text" },
@@ -107,10 +115,14 @@ const HINTS: Record<keyof ContractorInput, string[]> = {
   department: ["department", "dept", "team"],
   function: ["function", "role", "jobfunction", "position", "title"],
   country: ["country", "location", "region", "site"],
+  vendor: ["vendor", "supplier", "agency", "vendorname", "suppliername", "staffingpartner"],
   sow_name: ["sowname", "sow", "statementofwork", "projectname", "project"],
   sow_start_date: ["sowstartdate", "startdate", "start", "contractstart"],
   sow_end_date: ["sowenddate", "enddate", "end", "contractend", "expirydate", "expirationdate"],
   termination_date: ["terminationdate", "terminatedate", "termdate", "exitdate", "lastworkingday"],
+  monthly_rate: ["monthlyrate", "rate", "monthlyfee", "fee", "monthrate"],
+  currency: ["currency", "curr", "ratecurrency", "currencycode"],
+  renewal_count: ["renewalcount", "renewals", "renewaltimes", "extensions", "renewed"],
   addis_status: ["addisstatus", "addis", "systemstatus", "accountstatus", "status"],
   manager: ["manager", "linemanager", "reportingmanager", "supervisor", "owner"],
   notes: ["notes", "comment", "comments", "remarks"],
