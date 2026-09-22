@@ -187,6 +187,15 @@ export function mapRows(rows: Record<string, unknown>[], mapping: Record<string,
         const iso = toISODate(raw);
         if (raw && !iso) issues.push(`${f.label} not a valid date`);
         record[f.key] = iso as never;
+      } else if (f.type === "number") {
+        const rawStr = raw === null || raw === undefined ? "" : String(raw).trim();
+        if (!rawStr) {
+          record[f.key] = (f.key === "renewal_count" ? 0 : null) as never;
+        } else {
+          const n = Number(rawStr.replace(/[,$\s]/g, ""));
+          if (isNaN(n)) issues.push(`${f.label} not a valid number`);
+          record[f.key] = (isNaN(n) ? (f.key === "renewal_count" ? 0 : null) : n) as never;
+        }
       } else {
         const v = raw === null || raw === undefined ? null : String(raw).trim();
         record[f.key] = (v === "" ? null : v) as never;
@@ -204,6 +213,10 @@ export function exportToExcel(contractors: Contractor[], filename = "contractors
     Department: c.department ?? "",
     Function: c.function ?? "",
     Country: c.country ?? "",
+    Vendor: c.vendor ?? "",
+    "Monthly Rate": c.monthly_rate ?? "",
+    Currency: c.currency ?? "",
+    Renewals: c.renewal_count ?? 0,
     "SoW Name": c.sow_name ?? "",
     "SoW Start Date": c.sow_start_date ?? "",
     "SoW End Date": c.sow_end_date ?? "",
