@@ -78,17 +78,28 @@ export function UploadDialog({
         const { error: insErr } = await supabase.from("contractors").insert(valid.map((r) => r.record));
         if (insErr) throw insErr;
       } else {
-        const { data: existing, error } = await supabase.from("contractors").select("id,email,name");
+        const { data: existing, error } = await supabase
+          .from("contractors")
+          .select("id,email,sow_end_date,renewal_count");
         if (error) throw error;
         const byEmail = new Map(
-          (existing ?? []).filter((e) => e.email).map((e) => [String(e.email).toLowerCase(), e.id]),
+          (existing ?? []).filter((e) => e.email).map((e) => [String(e.email).toLowerCase(), e]),
         );
         const toInsert: (typeof valid)[number]["record"][] = [];
         for (const r of valid) {
           const key = r.record.email?.toLowerCase();
-          const id = key ? byEmail.get(key) : undefined;
-          if (id) {
-            const { error: upErr } = await supabase.from("contractors").update(r.record).eq("id", id);
+          const found = key ? byEmail.get(key) : undefined;
+          if (found) {
+            // A later SoW end date than before counts as a renewal.
+            const renewed =
+              found.renewal_count +
+              (r.record.sow_end_date && found.sow_end_date && r.record.sow_end_date > found.sow_end_date
+                ? 1
+                : 0);
+            const { error: upErr } = await supabase
+              .from("contractors")
+              .update({ ...r.record, renewal_count: renewed })
+              .eq("id", found.id);
             if (upErr) throw upErr;
           } else {
             toInsert.push(r.record);
