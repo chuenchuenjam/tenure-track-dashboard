@@ -58,7 +58,7 @@ export function ContractorSheet({
   const set = (key: keyof ContractorInput, value: string) =>
     setForm((f) => ({
       ...f,
-      [key]: value === "" ? (key === "renewal_count" ? 0 : null) : value,
+      [key]: value === "" ? (key === "renewal_count" ? 0 : key === "work_type" ? "Contractor" : null) : value,
     }));
 
   async function save() {
@@ -109,6 +109,10 @@ export function ContractorSheet({
         </SheetHeader>
 
         <div className="space-y-4 px-4 pb-6">
+          <datalist id="work-types">
+            <option value="Contractor" />
+            <option value="FTE" />
+          </datalist>
           {FIELDS.filter((f) => f.key !== "notes").map((f) => (
             <div key={f.key} className="space-y-1.5">
               <Label htmlFor={f.key}>{f.label}</Label>
@@ -117,6 +121,7 @@ export function ContractorSheet({
                 type={f.type === "date" ? "date" : f.type === "number" ? "number" : "text"}
                 step={f.key === "monthly_rate" ? "0.01" : undefined}
                 min={f.type === "number" ? 0 : undefined}
+                list={f.key === "work_type" ? "work-types" : undefined}
                 value={((form[f.key] as string | number | null) ?? "") as string | number}
                 onChange={(e) => set(f.key, e.target.value)}
               />
