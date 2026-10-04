@@ -150,15 +150,15 @@ export function UploadDialog({
           continue;
         }
         // Only fields with a value in the file overwrite; per-field "keep current" respected.
-        const update: Record<string, unknown> = {};
+        const update: Partial<ContractorInput> = {};
         for (const f of FIELDS) {
           if (f.key === "renewal_count") continue;
           const nv = r.record[f.key];
           if (isEmpty(nv)) continue;
           if (picks[found.id]?.[f.key] === "old") continue;
-          update[f.key] = nv;
+          (update as Record<string, unknown>)[f.key] = nv;
         }
-        const finalEnd = (update.sow_end_date as string | undefined) ?? found.sow_end_date;
+        const finalEnd = update.sow_end_date ?? found.sow_end_date;
         const renewed =
           found.renewal_count + (finalEnd && found.sow_end_date && finalEnd > found.sow_end_date ? 1 : 0);
         update.renewal_count = renewed;
