@@ -6,6 +6,9 @@ export type Contractor = {
   email: string | null;
   department: string | null;
   function: string | null;
+  role: string | null;
+  work_type: string;
+  contract_type: string | null;
   country: string | null;
   vendor: string | null;
   monthly_rate: number | null;
@@ -27,23 +30,27 @@ export type ContractorInput = Omit<Contractor, "id" | "created_at" | "updated_at
 export type Status = "Terminated" | "Expired" | "Expiring" | "Active";
 
 export const EXPIRY_WINDOW_DAYS = 180;
+export const WORK_TYPES = ["Contractor", "FTE"] as const;
 
 export const FIELDS: { key: keyof ContractorInput; label: string; type: "text" | "date" | "number" }[] = [
   { key: "name", label: "Name", type: "text" },
   { key: "email", label: "Email", type: "text" },
+  { key: "work_type", label: "Work Type", type: "text" },
   { key: "department", label: "Department", type: "text" },
   { key: "function", label: "Function", type: "text" },
+  { key: "role", label: "Role", type: "text" },
   { key: "country", label: "Country", type: "text" },
   { key: "vendor", label: "Vendor", type: "text" },
   { key: "sow_name", label: "SoW Name", type: "text" },
   { key: "sow_start_date", label: "SoW Start Date", type: "date" },
-  { key: "sow_end_date", label: "SoW End Date", type: "date" },
+  { key: "sow_end_date", label: "SoW / Project End Date", type: "date" },
   { key: "termination_date", label: "Termination Date", type: "date" },
+  { key: "contract_type", label: "Contract Type", type: "text" },
   { key: "monthly_rate", label: "Monthly Rate", type: "number" },
   { key: "currency", label: "Currency", type: "text" },
   { key: "renewal_count", label: "Renewals", type: "number" },
   { key: "addis_status", label: "ADDIS Status", type: "text" },
-  { key: "manager", label: "Manager", type: "text" },
+  { key: "manager", label: "Direct Manager", type: "text" },
   { key: "notes", label: "Notes", type: "text" },
 ];
 
@@ -112,19 +119,22 @@ function normalize(s: string) {
 const HINTS: Record<keyof ContractorInput, string[]> = {
   name: ["name", "fullname", "contractor", "contractorname", "employeename"],
   email: ["email", "emailaddress", "mail", "workemail"],
+  work_type: ["worktype", "workertype", "employmenttype", "employeetype", "fteorcontractor"],
   department: ["department", "dept", "team"],
-  function: ["function", "role", "jobfunction", "position", "title"],
+  function: ["function", "jobfunction"],
+  role: ["role", "jobtitle", "title", "position", "jobrole"],
   country: ["country", "location", "region", "site"],
   vendor: ["vendor", "supplier", "agency", "vendorname", "suppliername", "staffingpartner"],
-  sow_name: ["sowname", "sow", "statementofwork", "projectname", "project"],
-  sow_start_date: ["sowstartdate", "startdate", "start", "contractstart"],
-  sow_end_date: ["sowenddate", "enddate", "end", "contractend", "expirydate", "expirationdate"],
+  sow_name: ["sowname", "sow", "statementofwork", "projectname"],
+  sow_start_date: ["sowstartdate", "startdate", "start", "contractstart", "projectstartdate"],
+  sow_end_date: ["sowenddate", "projectenddate", "projectend", "enddate", "end", "contractend", "expirydate", "expirationdate"],
   termination_date: ["terminationdate", "terminatedate", "termdate", "exitdate", "lastworkingday"],
+  contract_type: ["contracttype", "agreementtype", "engagementtype"],
   monthly_rate: ["monthlyrate", "rate", "monthlyfee", "fee", "monthrate"],
   currency: ["currency", "curr", "ratecurrency", "currencycode"],
   renewal_count: ["renewalcount", "renewals", "renewaltimes", "extensions", "renewed"],
   addis_status: ["addisstatus", "addis", "systemstatus", "accountstatus", "status"],
-  manager: ["manager", "linemanager", "reportingmanager", "supervisor", "owner"],
+  manager: ["directmanager", "manager", "linemanager", "reportingmanager", "supervisor", "owner"],
   notes: ["notes", "comment", "comments", "remarks"],
 };
 
@@ -176,7 +186,19 @@ export function toISODate(value: unknown): string | null {
 
 export type MappedRow = { record: ContractorInput; issues: string[] };
 
-export function mapRows(rows: Record<string, unknown>[], mapping: Record<string, string>): MappedRow[] {
+export function normalizeWorkType(v: string | null | undefined, fallback: string): string {
+  const s = (v ?? "").trim().toLowerCase();
+  if (!s) return fallback;
+  if (/fte|full|perm|employee|staff/.test(s)) return "FTE";
+  if (/contract|temp|freelanc|consult/.test(s)) return "Contractor";
+  return v!.trim();
+}
+
+export function mapRows(
+  rows: Record<string, unknown>[],
+  mapping: Record<string, string>,
+  defaultWorkType = "Contractor",
+): MappedRow[] {
   return rows.map((row) => {
     const issues: string[] = [];
     const record = {} as ContractorInput;
@@ -201,35 +223,123 @@ export function mapRows(rows: Record<string, unknown>[], mapping: Record<string,
         record[f.key] = (v === "" ? null : v) as never;
       }
     }
+    record.work_type = normalizeWorkType(record.work_type, defaultWorkType);
     if (!record.name) issues.push("Missing name");
     return { record, issues };
   });
 }
 
+/* ------------------------------ table columns ----------------------------- */
+
+export type ColumnDef = { key: string; label: string; value: (c: Contractor) => string | number };
+
+export const COLUMNS: ColumnDef[] = [
+  { key: "name", label: "Name", value: (c) => c.name },
+  { key: "email", label: "Email", value: (c) => c.email ?? "" },
+  { key: "work_type", label: "Work Type", value: (c) => c.work_type ?? "" },
+  { key: "department", label: "Department", value: (c) => c.department ?? "" },
+  { key: "function", label: "Function", value: (c) => c.function ?? "" },
+  { key: "role", label: "Role", value: (c) => c.role ?? "" },
+  { key: "manager", label: "Direct Manager", value: (c) => c.manager ?? "" },
+  { key: "contract_type", label: "Contract Type", value: (c) => c.contract_type ?? "" },
+  { key: "country", label: "Country", value: (c) => c.country ?? "" },
+  { key: "vendor", label: "Vendor", value: (c) => c.vendor ?? "" },
+  { key: "monthly_rate", label: "Monthly Rate", value: (c) => c.monthly_rate ?? "" },
+  { key: "currency", label: "Currency", value: (c) => c.currency ?? "" },
+  { key: "sow_name", label: "SoW Name", value: (c) => c.sow_name ?? "" },
+  { key: "sow_start_date", label: "SoW Start", value: (c) => c.sow_start_date ?? "" },
+  { key: "sow_end_date", label: "SoW / Project End", value: (c) => c.sow_end_date ?? "" },
+  { key: "termination_date", label: "Termination", value: (c) => c.termination_date ?? "" },
+  { key: "renewal_count", label: "Renewals", value: (c) => c.renewal_count ?? 0 },
+  { key: "addis_status", label: "ADDIS", value: (c) => c.addis_status ?? "" },
+  { key: "notes", label: "Notes", value: (c) => c.notes ?? "" },
+  { key: "status", label: "Status", value: (c) => getStatus(c) },
+  { key: "days", label: "Days To Expiry", value: (c) => daysUntil(c.sow_end_date) ?? "" },
+];
+
+export const DEFAULT_COLUMNS = [
+  "name",
+  "work_type",
+  "role",
+  "manager",
+  "contract_type",
+  "function",
+  "country",
+  "vendor",
+  "sow_end_date",
+  "termination_date",
+  "addis_status",
+  "status",
+];
+
 export function exportToExcel(contractors: Contractor[], filename = "contractors.xlsx") {
-  const data = contractors.map((c) => ({
-    Name: c.name,
-    Email: c.email ?? "",
-    Department: c.department ?? "",
-    Function: c.function ?? "",
-    Country: c.country ?? "",
-    Vendor: c.vendor ?? "",
-    "Monthly Rate": c.monthly_rate ?? "",
-    Currency: c.currency ?? "",
-    Renewals: c.renewal_count ?? 0,
-    "SoW Name": c.sow_name ?? "",
-    "SoW Start Date": c.sow_start_date ?? "",
-    "SoW End Date": c.sow_end_date ?? "",
-    "Termination Date": c.termination_date ?? "",
-    "ADDIS Status": c.addis_status ?? "",
-    Manager: c.manager ?? "",
-    Notes: c.notes ?? "",
-    Status: getStatus(c),
-    "Days To Expiry": daysUntil(c.sow_end_date) ?? "",
-  }));
+  const data = contractors.map((c) =>
+    Object.fromEntries(COLUMNS.map((col) => [col.label, col.value(c)])),
+  );
   const ws = XLSX.utils.json_to_sheet(data);
-  ws["!cols"] = Object.keys(data[0] ?? { Name: "" }).map(() => ({ wch: 18 }));
+  ws["!cols"] = COLUMNS.map(() => ({ wch: 18 }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Contractors");
   XLSX.writeFile(wb, filename);
+}
+
+/** Multi-sheet report: summary + breakdowns + details using chosen columns. */
+export function exportReport(
+  rows: Contractor[],
+  opts: { title: string; filters: [string, string][]; columns: string[]; filename?: string },
+) {
+  const statusCount = (s: Status) => rows.filter((c) => getStatus(c) === s).length;
+  const within = (n: number) =>
+    rows.filter((c) => {
+      const d = daysUntil(c.sow_end_date);
+      return d !== null && d >= 0 && d <= n && getStatus(c) !== "Terminated";
+    }).length;
+  const summary: (string | number)[][] = [
+    ["Report", opts.title],
+    ["Generated", new Date().toISOString().slice(0, 16).replace("T", " ")],
+    [],
+    ["Filters"],
+    ...(opts.filters.length ? opts.filters : [["(none)", ""]]),
+    [],
+    ["Metric", "Count"],
+    ["Total", rows.length],
+    ["Active (incl. expiring)", statusCount("Active") + statusCount("Expiring")],
+    ["Ending within 90 days", within(90)],
+    ["Ending within 180 days", within(180)],
+    ["Expired", statusCount("Expired")],
+    ["Terminated", statusCount("Terminated")],
+    ["SoW ended, still in system", rows.filter(needsAttention).length],
+  ];
+  const breakdown: (string | number)[][] = [];
+  const dims: [string, (c: Contractor) => string][] = [
+    ["Work Type", (c) => c.work_type],
+    ["Function", (c) => c.function ?? ""],
+    ["Country", (c) => c.country ?? ""],
+    ["Vendor", (c) => c.vendor ?? ""],
+    ["Status", (c) => getStatus(c)],
+  ];
+  for (const [label, get] of dims) {
+    const m = new Map<string, number>();
+    for (const c of rows) {
+      const k = get(c).trim() || "Unspecified";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    breakdown.push([label, "Count"]);
+    [...m].sort((a, b) => b[1] - a[1]).forEach(([k, v]) => breakdown.push([k, v]));
+    breakdown.push([]);
+  }
+  const cols = COLUMNS.filter((c) => opts.columns.includes(c.key));
+  const details = rows.map((c) => Object.fromEntries(cols.map((col) => [col.label, col.value(c)])));
+
+  const wb = XLSX.utils.book_new();
+  const s1 = XLSX.utils.aoa_to_sheet(summary);
+  s1["!cols"] = [{ wch: 30 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, s1, "Summary");
+  const s2 = XLSX.utils.aoa_to_sheet(breakdown);
+  s2["!cols"] = [{ wch: 28 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, s2, "Breakdown");
+  const s3 = XLSX.utils.json_to_sheet(details.length ? details : [{}]);
+  s3["!cols"] = cols.map(() => ({ wch: 18 }));
+  XLSX.utils.book_append_sheet(wb, s3, "Details");
+  XLSX.writeFile(wb, opts.filename ?? "report.xlsx");
 }

@@ -2,27 +2,45 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Upload, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { Upload, FileSpreadsheet, AlertTriangle, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FIELDS,
   guessMapping,
   mapRows,
   readSheet,
+  type Contractor,
+  type ContractorInput,
   type MappedRow,
   type ParsedSheet,
 } from "@/lib/contractors";
 
 const NONE = "__none__";
+const SKIP_COMPARE = new Set<keyof ContractorInput>(["renewal_count"]);
+
+type FieldDiff = { key: keyof ContractorInput; label: string; oldVal: unknown; newVal: unknown };
+type Conflict = { existing: Contractor; incoming: ContractorInput; diffs: FieldDiff[] };
+
+const isEmpty = (v: unknown) => v === null || v === undefined || v === "";
+const same = (a: unknown, b: unknown) =>
+  typeof a === "number" || typeof b === "number"
+    ? Number(a) === Number(b)
+    : String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
+function diffRecord(existing: Contractor, incoming: ContractorInput): FieldDiff[] {
+  const out: FieldDiff[] = [];
+  for (const f of FIELDS) {
+    if (SKIP_COMPARE.has(f.key)) continue;
+    const nv = incoming[f.key];
+    const ov = existing[f.key];
+    if (isEmpty(nv) || isEmpty(ov)) continue;
+    if (!same(ov, nv)) out.push({ key: f.key, label: f.label, oldVal: ov, newVal: nv });
+  }
+  return out;
+}
 
 export function UploadDialog({
   open,
@@ -37,13 +55,20 @@ export function UploadDialog({
   const [fileName, setFileName] = useState("");
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<"merge" | "replace">("merge");
+  const [workType, setWorkType] = useState<"Contractor" | "FTE">("Contractor");
   const [busy, setBusy] = useState(false);
+  const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
+  const [existingRows, setExistingRows] = useState<Contractor[]>([]);
+  /** choice[existingId][field] = "old" | "new" */
+  const [choice, setChoice] = useState<Record<string, Record<string, "old" | "new">>>({});
 
   const reset = () => {
     setSheet(null);
     setFileName("");
     setMapping({});
     setBusy(false);
+    setConflicts(null);
+    setChoice({});
   };
 
   async function handleFile(file: File) {
@@ -56,70 +81,113 @@ export function UploadDialog({
       setSheet(parsed);
       setFileName(file.name);
       setMapping(guessMapping(parsed.headers));
+      if (/fte|employee|staff/i.test(file.name)) setWorkType("FTE");
     } catch {
       toast.error("Could not read that file. Please use .xlsx or .csv");
     }
   }
 
-  const mapped: MappedRow[] = sheet ? mapRows(sheet.rows, mapping) : [];
+  const mapped: MappedRow[] = sheet ? mapRows(sheet.rows, mapping, workType) : [];
   const valid = mapped.filter((r) => r.record.name);
   const problems = mapped.filter((r) => r.issues.length);
 
-  async function doImport() {
+  /** Step 1 (merge): look for differences against current records. */
+  async function checkAndImport() {
     if (!valid.length) {
       toast.error("Nothing to import");
       return;
     }
+    if (mode === "replace") return void writeReplace();
+    setBusy(true);
+    const { data, error } = await supabase.from("contractors").select("*");
+    setBusy(false);
+    if (error) return void toast.error(error.message);
+    const rows = (data ?? []) as Contractor[];
+    setExistingRows(rows);
+    const byEmail = new Map(rows.filter((e) => e.email).map((e) => [e.email!.toLowerCase(), e]));
+    const found: Conflict[] = [];
+    for (const r of valid) {
+      const ex = r.record.email ? byEmail.get(r.record.email.toLowerCase()) : undefined;
+      if (!ex) continue;
+      const diffs = diffRecord(ex, r.record);
+      if (diffs.length) found.push({ existing: ex, incoming: r.record, diffs });
+    }
+    if (found.length) {
+      const init: typeof choice = {};
+      for (const c of found) init[c.existing.id] = Object.fromEntries(c.diffs.map((d) => [d.key, "new"]));
+      setChoice(init);
+      setConflicts(found);
+      return;
+    }
+    await writeMerge(rows, {});
+  }
+
+  async function writeReplace() {
     setBusy(true);
     try {
-      if (mode === "replace") {
-        const { error } = await supabase.from("contractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-        if (error) throw error;
-        const { error: insErr } = await supabase.from("contractors").insert(valid.map((r) => r.record));
-        if (insErr) throw insErr;
-      } else {
-        const { data: existing, error } = await supabase
-          .from("contractors")
-          .select("id,email,sow_end_date,renewal_count");
-        if (error) throw error;
-        const byEmail = new Map(
-          (existing ?? []).filter((e) => e.email).map((e) => [String(e.email).toLowerCase(), e]),
-        );
-        const toInsert: (typeof valid)[number]["record"][] = [];
-        for (const r of valid) {
-          const key = r.record.email?.toLowerCase();
-          const found = key ? byEmail.get(key) : undefined;
-          if (found) {
-            // A later SoW end date than before counts as a renewal.
-            const renewed =
-              found.renewal_count +
-              (r.record.sow_end_date && found.sow_end_date && r.record.sow_end_date > found.sow_end_date
-                ? 1
-                : 0);
-            const { error: upErr } = await supabase
-              .from("contractors")
-              .update({ ...r.record, renewal_count: renewed })
-              .eq("id", found.id);
-            if (upErr) throw upErr;
-          } else {
-            toInsert.push(r.record);
-          }
-        }
-        if (toInsert.length) {
-          const { error: insErr } = await supabase.from("contractors").insert(toInsert);
-          if (insErr) throw insErr;
-        }
-      }
-      toast.success(`Imported ${valid.length} contractor${valid.length === 1 ? "" : "s"}`);
-      onImported();
-      onOpenChange(false);
-      reset();
+      const { error } = await supabase.from("contractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      if (error) throw error;
+      const { error: insErr } = await supabase.from("contractors").insert(valid.map((r) => r.record));
+      if (insErr) throw insErr;
+      done();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
       setBusy(false);
     }
   }
+
+  async function writeMerge(rows: Contractor[], picks: typeof choice) {
+    setBusy(true);
+    try {
+      const byEmail = new Map(rows.filter((e) => e.email).map((e) => [e.email!.toLowerCase(), e]));
+      const toInsert: ContractorInput[] = [];
+      for (const r of valid) {
+        const key = r.record.email?.toLowerCase();
+        const found = key ? byEmail.get(key) : undefined;
+        if (!found) {
+          toInsert.push(r.record);
+          continue;
+        }
+        // Only fields with a value in the file overwrite; per-field "keep current" respected.
+        const update: Partial<ContractorInput> = {};
+        for (const f of FIELDS) {
+          if (f.key === "renewal_count") continue;
+          const nv = r.record[f.key];
+          if (isEmpty(nv)) continue;
+          if (picks[found.id]?.[f.key] === "old") continue;
+          (update as Record<string, unknown>)[f.key] = nv;
+        }
+        const finalEnd = update.sow_end_date ?? found.sow_end_date;
+        const renewed =
+          found.renewal_count + (finalEnd && found.sow_end_date && finalEnd > found.sow_end_date ? 1 : 0);
+        update.renewal_count = renewed;
+        const { error: upErr } = await supabase.from("contractors").update(update).eq("id", found.id);
+        if (upErr) throw upErr;
+      }
+      if (toInsert.length) {
+        const { error: insErr } = await supabase.from("contractors").insert(toInsert);
+        if (insErr) throw insErr;
+      }
+      done();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function done() {
+    toast.success(`Imported ${valid.length} record${valid.length === 1 ? "" : "s"}`);
+    onImported();
+    onOpenChange(false);
+    reset();
+  }
+
+  const setAll = (v: "old" | "new") =>
+    setChoice((prev) =>
+      Object.fromEntries(Object.entries(prev).map(([id, m]) => [id, Object.fromEntries(Object.keys(m).map((k) => [k, v]))])),
+    );
 
   return (
     <Dialog
@@ -131,11 +199,72 @@ export function UploadDialog({
     >
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Upload contractor list</DialogTitle>
-          <DialogDescription>Excel (.xlsx) or CSV. Check the column matching before importing.</DialogDescription>
+          <DialogTitle>{conflicts ? "Resolve conflicts" : "Upload contractor or FTE list"}</DialogTitle>
+          <DialogDescription>
+            {conflicts
+              ? `${conflicts.length} existing ${conflicts.length === 1 ? "person has" : "people have"} different details in this file. Choose which value to keep.`
+              : "Excel (.xlsx) or CSV. Check the column matching before importing."}
+          </DialogDescription>
         </DialogHeader>
 
-        {!sheet ? (
+        {conflicts ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAll("old")}>
+                Keep all current
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setAll("new")}>
+                Use all from file
+              </Button>
+            </div>
+            <div className="space-y-3">
+              {conflicts.map((c) => (
+                <div key={c.existing.id} className="rounded-lg border border-border">
+                  <div className="border-b border-border bg-muted/40 px-3 py-2 text-sm">
+                    <span className="font-medium">{c.existing.name}</span>{" "}
+                    <span className="text-muted-foreground">{c.existing.email}</span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {c.diffs.map((d) => {
+                      const pick = choice[c.existing.id]?.[d.key] ?? "new";
+                      const opt = (v: "old" | "new", label: string, val: unknown) => (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChoice((p) => ({ ...p, [c.existing.id]: { ...p[c.existing.id], [d.key]: v } }))
+                          }
+                          className={`flex-1 rounded-md border px-2 py-1.5 text-left text-sm transition-colors ${
+                            pick === v ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
+                          }`}
+                        >
+                          <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
+                          {String(val)}
+                        </button>
+                      );
+                      return (
+                        <div key={d.key} className="grid gap-2 px-3 py-2 sm:grid-cols-[140px_1fr]">
+                          <span className="pt-1.5 text-xs font-medium text-muted-foreground">{d.label}</span>
+                          <div className="flex gap-2">
+                            {opt("old", "Current", d.oldVal)}
+                            {opt("new", "From file", d.newVal)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between gap-2">
+              <Button variant="ghost" onClick={() => setConflicts(null)}>
+                <ArrowLeft className="size-4" /> Back
+              </Button>
+              <Button onClick={() => writeMerge(existingRows, choice)} disabled={busy}>
+                {busy ? "Importing…" : `Import ${valid.length} records`}
+              </Button>
+            </div>
+          </div>
+        ) : !sheet ? (
           <label
             className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-muted/40 px-6 py-14 text-center transition-colors hover:border-primary/60 hover:bg-muted"
             onDragOver={(e) => e.preventDefault()}
@@ -169,6 +298,24 @@ export function UploadDialog({
               <Button variant="ghost" size="sm" className="ml-auto" onClick={reset}>
                 Change file
               </Button>
+            </div>
+
+            <div>
+              <h3 className="mb-2 text-sm font-semibold">This file is a list of</h3>
+              <RadioGroup
+                value={workType}
+                onValueChange={(v) => setWorkType(v as "Contractor" | "FTE")}
+                className="flex gap-4"
+              >
+                {(["Contractor", "FTE"] as const).map((w) => (
+                  <label key={w} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <RadioGroupItem value={w} /> {w === "Contractor" ? "Contractors" : "FTEs"}
+                  </label>
+                ))}
+              </RadioGroup>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Used for rows without a Work Type column value.
+              </p>
             </div>
 
             <div>
@@ -229,7 +376,9 @@ export function UploadDialog({
                   <RadioGroupItem value="merge" className="mt-0.5" />
                   <span className="text-sm">
                     <span className="font-medium">Merge by email</span>
-                    <span className="block text-muted-foreground">Update matching people, add the new ones.</span>
+                    <span className="block text-muted-foreground">
+                      Update matching people, add the new ones. You'll be asked about any conflicting values.
+                    </span>
                   </span>
                 </label>
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
@@ -246,8 +395,8 @@ export function UploadDialog({
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button onClick={doImport} disabled={busy || !valid.length}>
-                {busy ? "Importing…" : `Import ${valid.length} contractors`}
+              <Button onClick={checkAndImport} disabled={busy || !valid.length}>
+                {busy ? "Checking…" : `Import ${valid.length} records`}
               </Button>
             </div>
           </div>

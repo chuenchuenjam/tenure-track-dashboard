@@ -17,6 +17,7 @@ export type Database = {
       contractors: {
         Row: {
           addis_status: string | null
+          contract_type: string | null
           country: string | null
           created_at: string
           currency: string | null
@@ -29,15 +30,18 @@ export type Database = {
           name: string
           notes: string | null
           renewal_count: number
+          role: string | null
           sow_end_date: string | null
           sow_name: string | null
           sow_start_date: string | null
           termination_date: string | null
           updated_at: string
           vendor: string | null
+          work_type: string
         }
         Insert: {
           addis_status?: string | null
+          contract_type?: string | null
           country?: string | null
           created_at?: string
           currency?: string | null
@@ -50,15 +54,18 @@ export type Database = {
           name: string
           notes?: string | null
           renewal_count?: number
+          role?: string | null
           sow_end_date?: string | null
           sow_name?: string | null
           sow_start_date?: string | null
           termination_date?: string | null
           updated_at?: string
           vendor?: string | null
+          work_type?: string
         }
         Update: {
           addis_status?: string | null
+          contract_type?: string | null
           country?: string | null
           created_at?: string
           currency?: string | null
@@ -71,12 +78,44 @@ export type Database = {
           name?: string
           notes?: string | null
           renewal_count?: number
+          role?: string | null
           sow_end_date?: string | null
           sow_name?: string | null
           sow_start_date?: string | null
           termination_date?: string | null
           updated_at?: string
           vendor?: string | null
+          work_type?: string
+        }
+        Relationships: []
+      }
+      saved_reports: {
+        Row: {
+          columns: Json
+          created_at: string
+          created_by: string
+          filters: Json
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          created_by?: string
+          filters?: Json
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          created_by?: string
+          filters?: Json
+          id?: string
+          name?: string
+          updated_at?: string
         }
         Relationships: []
       }
