@@ -1288,7 +1288,7 @@ function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onImported={() => void refetch()} />
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onImported={() => { void refetch(); void refetchUploads(); }} />
       <ContractorSheet contractor={editing} open={sheetOpen} onOpenChange={setSheetOpen} onSaved={() => void refetch()} />
     </div>
   );
