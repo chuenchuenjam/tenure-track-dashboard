@@ -28,6 +28,8 @@ import {
   X,
   Search,
   Columns3,
+  LayoutGrid,
+  History,
   FileText,
   Save,
   Trash2,
@@ -97,6 +99,24 @@ export const Route = createFileRoute("/_authenticated/")({
 
 const ALL = "__all__";
 const COLS_KEY = "dashboard.columns.v1";
+const WIDGETS_KEY = "dashboard.widgets.v1";
+const WIDGETS: { key: string; label: string }[] = [
+  { key: "kpi:Total", label: "Total (card)" },
+  { key: "kpi:Active", label: "Active (card)" },
+  { key: "kpi:Ending within 90 days", label: "Ending within 90 days (card)" },
+  { key: "kpi:Ending within 180 days", label: "Ending within 180 days (card)" },
+  { key: "kpi:SoW ended, still in system", label: "SoW ended, still in system (card)" },
+  { key: "kpi:Monthly spend (active)", label: "Monthly spend (active) (card)" },
+  { key: "chart:Monthly resource count by vendor", label: "Monthly resource count by vendor" },
+  { key: "chart:Headcount trend", label: "Headcount trend" },
+  { key: "chart:Monthly spend by vendor", label: "Monthly spend by vendor" },
+  { key: "chart:Terminations by year", label: "Terminations by year" },
+  { key: "chart:Upcoming expiries by month", label: "Upcoming expiries by month" },
+  { key: "chart:Split by function", label: "Split by function" },
+  { key: "chart:Split by country", label: "Split by country" },
+  { key: "chart:Renewal queue", label: "Renewal queue" },
+];
+
 const CHART_COLORS = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -258,6 +278,20 @@ function Dashboard() {
       /* ignore */
     }
   }, []);
+  const [hiddenWidgets, setHiddenWidgets] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(WIDGETS_KEY);
+      if (raw) setHiddenWidgets(JSON.parse(raw) as string[]);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const show = (key: string) => !hiddenWidgets.includes(key);
+  const updateWidgets = (next: string[]) => {
+    setHiddenWidgets(next);
+    localStorage.setItem(WIDGETS_KEY, JSON.stringify(next));
+  };
   const updateCols = (next: string[]) => {
     setCols(next);
     localStorage.setItem(COLS_KEY, JSON.stringify(next));
@@ -567,6 +601,31 @@ function Dashboard() {
               </button>
             ))}
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <LayoutGrid className="size-4" /> Widgets
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-96 w-64 overflow-y-auto">
+              <DropdownMenuLabel>Show on dashboard</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {WIDGETS.map((w) => (
+                <DropdownMenuCheckboxItem
+                  key={w.key}
+                  checked={show(w.key)}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(v) =>
+                    updateWidgets(v ? hiddenWidgets.filter((k) => k !== w.key) : [...hiddenWidgets, w.key])
+                  }
+                >
+                  {w.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => updateWidgets([])}>Show all</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={() => openRow(null)}>
             <Plus className="size-4" /> Add
           </Button>
@@ -578,6 +637,7 @@ function Dashboard() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+{show("kpi:Total") && (
           <Kpi
             label="Total"
             value={stats.total}
@@ -586,6 +646,8 @@ function Dashboard() {
             active={!hasFilters}
             onClick={clearFilters}
           />
+          )}
+{show("kpi:Active") && (
           <Kpi
             label="Active"
             value={stats.active}
@@ -594,6 +656,8 @@ function Dashboard() {
             active={f.drill?.kind === "active"}
             onClick={() => setDrill({ label: "Active", kind: "active" })}
           />
+          )}
+{show("kpi:Ending within 90 days") && (
           <Kpi
             label="Ending within 90 days"
             value={stats.in90}
@@ -602,6 +666,8 @@ function Dashboard() {
             active={f.drill?.kind === "within" && f.drill.value === "90"}
             onClick={() => setDrill({ label: "Ending within 90 days", kind: "within", value: "90" })}
           />
+          )}
+{show("kpi:Ending within 180 days") && (
           <Kpi
             label="Ending within 180 days"
             value={stats.in180}
@@ -610,6 +676,8 @@ function Dashboard() {
             active={f.drill?.kind === "within" && f.drill.value === "180"}
             onClick={() => setDrill({ label: "Ending within 180 days", kind: "within", value: "180" })}
           />
+          )}
+{show("kpi:SoW ended, still in system") && (
           <Kpi
             label="SoW ended, still in system"
             value={stats.attention}
@@ -618,6 +686,8 @@ function Dashboard() {
             active={f.drill?.kind === "attention"}
             onClick={() => setDrill({ label: "SoW ended, still in system", kind: "attention" })}
           />
+          )}
+{show("kpi:Monthly spend (active)") && (
           <Kpi
             label="Monthly spend (active)"
             value={fmtMoney(spend.total, spend.currency) + (spend.mixed ? "+" : "")}
@@ -626,11 +696,13 @@ function Dashboard() {
             active={false}
             onClick={() => setDrill({ label: "Active", kind: "active" })}
           />
+          )}
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
           <Card className="lg:col-span-2">
             <CardHeader>
+{show("chart:Monthly resource count by vendor") && (
               <CardTitle className="text-base">Monthly resource count by vendor — last 12 months</CardTitle>
             </CardHeader>
             <CardContent className="h-72">
@@ -665,9 +737,11 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Headcount trend") && (
               <CardTitle className="text-base">Headcount trend — last 12 months</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -681,9 +755,11 @@ function Dashboard() {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Monthly spend by vendor") && (
               <CardTitle className="text-base">Monthly spend by vendor</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -715,9 +791,11 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Terminations by year") && (
               <CardTitle className="text-base">Terminations by year</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -743,9 +821,11 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Upcoming expiries by month") && (
               <CardTitle className="text-base">Upcoming expiries by month</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -771,9 +851,11 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Split by function") && (
               <CardTitle className="text-base">Split by function</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -799,9 +881,11 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
           <Card>
             <CardHeader>
+{show("chart:Split by country") && (
               <CardTitle className="text-base">Split by country</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -833,11 +917,13 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
         </section>
 
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
             <div>
+{show("chart:Renewal queue") && (
               <CardTitle className="text-base">
                 Renewal queue — next {renewalWindow} days{" "}
                 <Badge variant="secondary" className="ml-1">
@@ -912,6 +998,7 @@ function Dashboard() {
             )}
           </CardContent>
         </Card>
+)}
 
         <section className="rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center gap-3 border-b border-border p-4">
