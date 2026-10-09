@@ -35,6 +35,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,6 +100,13 @@ export const Route = createFileRoute("/_authenticated/")({
 
 const ALL = "__all__";
 const COLS_KEY = "dashboard.columns.v1";
+function downloadUpload(name: string, rows: Record<string, unknown>[], overrides: Record<string, unknown>[]) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), "Uploaded rows");
+  if (overrides.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overrides), "Conflicts");
+  XLSX.writeFile(wb, `upload-${name.replace(/\.[^.]+$/, "")}.xlsx`);
+}
+
 const WIDGETS_KEY = "dashboard.widgets.v1";
 const WIDGETS: { key: string; label: string }[] = [
   { key: "kpi:Total", label: "Total (card)" },
@@ -115,6 +123,7 @@ const WIDGETS: { key: string; label: string }[] = [
   { key: "chart:Split by function", label: "Split by function" },
   { key: "chart:Split by country", label: "Split by country" },
   { key: "chart:Renewal queue", label: "Renewal queue" },
+  { key: "uploads", label: "Upload history" },
 ];
 
 const CHART_COLORS = [
@@ -306,6 +315,19 @@ function Dashboard() {
         .order("sow_end_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as Contractor[];
+    },
+  });
+
+  const { data: uploads = [], refetch: refetchUploads } = useQuery({
+    queryKey: ["upload_history"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("upload_history")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data ?? [];
     },
   });
 
@@ -1164,6 +1186,76 @@ function Dashboard() {
             Showing {filtered.length} of {contractors.length} records
           </div>
         </section>
+        {show("uploads") && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <History className="size-4" /> Upload history
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Every file uploaded is kept here. Download the original rows or see which conflicting values were kept.
+              </p>
+            </CardHeader>
+            <CardContent className="px-0 pb-0">
+              {uploads.length ? (
+                <div className="max-h-80 overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>When</TableHead>
+                        <TableHead>File</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Rows</TableHead>
+                        <TableHead className="text-right">Added</TableHead>
+                        <TableHead className="text-right">Updated</TableHead>
+                        <TableHead className="text-right">Conflicts</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {uploads.map((u) => (
+                        <TableRow key={u.id}>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {u.created_at.slice(0, 16).replace("T", " ")}
+                          </TableCell>
+                          <TableCell className="font-medium">{u.file_name}</TableCell>
+                          <TableCell>{u.work_type}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.row_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.inserted_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.updated_count}</TableCell>
+                          <TableCell className="text-right">
+                            {u.conflict_count > 0 ? (
+                              <Badge className="border-0 bg-amber-500/20 text-amber-700">{u.conflict_count}</Badge>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                downloadUpload(
+                                  u.file_name,
+                                  u.rows as Record<string, unknown>[],
+                                  u.overrides as Record<string, unknown>[],
+                                )
+                              }
+                            >
+                              <Download className="size-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <p className="px-6 pb-6 text-sm text-muted-foreground">No uploads yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </main>
 
       <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
