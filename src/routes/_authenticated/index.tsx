@@ -700,9 +700,9 @@ function Dashboard() {
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
+{show("chart:Monthly resource count by vendor") && (
           <Card className="lg:col-span-2">
             <CardHeader>
-{show("chart:Monthly resource count by vendor") && (
               <CardTitle className="text-base">Monthly resource count by vendor — last 12 months</CardTitle>
             </CardHeader>
             <CardContent className="h-72">
@@ -739,9 +739,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Headcount trend") && (
           <Card>
             <CardHeader>
-{show("chart:Headcount trend") && (
               <CardTitle className="text-base">Headcount trend — last 12 months</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -757,9 +757,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Monthly spend by vendor") && (
           <Card>
             <CardHeader>
-{show("chart:Monthly spend by vendor") && (
               <CardTitle className="text-base">Monthly spend by vendor</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -793,9 +793,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Terminations by year") && (
           <Card>
             <CardHeader>
-{show("chart:Terminations by year") && (
               <CardTitle className="text-base">Terminations by year</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -823,9 +823,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Upcoming expiries by month") && (
           <Card>
             <CardHeader>
-{show("chart:Upcoming expiries by month") && (
               <CardTitle className="text-base">Upcoming expiries by month</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -853,9 +853,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Split by function") && (
           <Card>
             <CardHeader>
-{show("chart:Split by function") && (
               <CardTitle className="text-base">Split by function</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -883,9 +883,9 @@ function Dashboard() {
           </Card>
 )}
 
+{show("chart:Split by country") && (
           <Card>
             <CardHeader>
-{show("chart:Split by country") && (
               <CardTitle className="text-base">Split by country</CardTitle>
             </CardHeader>
             <CardContent className="h-64">
@@ -920,10 +920,10 @@ function Dashboard() {
 )}
         </section>
 
+{show("chart:Renewal queue") && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
             <div>
-{show("chart:Renewal queue") && (
               <CardTitle className="text-base">
                 Renewal queue — next {renewalWindow} days{" "}
                 <Badge variant="secondary" className="ml-1">
