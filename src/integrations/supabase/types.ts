@@ -119,6 +119,48 @@ export type Database = {
         }
         Relationships: []
       }
+      upload_history: {
+        Row: {
+          conflict_count: number
+          created_at: string
+          created_by: string
+          file_name: string
+          id: string
+          inserted_count: number
+          overrides: Json
+          row_count: number
+          rows: Json
+          updated_count: number
+          work_type: string
+        }
+        Insert: {
+          conflict_count?: number
+          created_at?: string
+          created_by?: string
+          file_name: string
+          id?: string
+          inserted_count?: number
+          overrides?: Json
+          row_count?: number
+          rows?: Json
+          updated_count?: number
+          work_type?: string
+        }
+        Update: {
+          conflict_count?: number
+          created_at?: string
+          created_by?: string
+          file_name?: string
+          id?: string
+          inserted_count?: number
+          overrides?: Json
+          row_count?: number
+          rows?: Json
+          updated_count?: number
+          work_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

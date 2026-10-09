@@ -28,11 +28,14 @@ import {
   X,
   Search,
   Columns3,
+  LayoutGrid,
+  History,
   FileText,
   Save,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -97,6 +100,32 @@ export const Route = createFileRoute("/_authenticated/")({
 
 const ALL = "__all__";
 const COLS_KEY = "dashboard.columns.v1";
+function downloadUpload(name: string, rows: Record<string, unknown>[], overrides: Record<string, unknown>[]) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), "Uploaded rows");
+  if (overrides.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overrides), "Conflicts");
+  XLSX.writeFile(wb, `upload-${name.replace(/\.[^.]+$/, "")}.xlsx`);
+}
+
+const WIDGETS_KEY = "dashboard.widgets.v1";
+const WIDGETS: { key: string; label: string }[] = [
+  { key: "kpi:Total", label: "Total (card)" },
+  { key: "kpi:Active", label: "Active (card)" },
+  { key: "kpi:Ending within 90 days", label: "Ending within 90 days (card)" },
+  { key: "kpi:Ending within 180 days", label: "Ending within 180 days (card)" },
+  { key: "kpi:SoW ended, still in system", label: "SoW ended, still in system (card)" },
+  { key: "kpi:Monthly spend (active)", label: "Monthly spend (active) (card)" },
+  { key: "chart:Monthly resource count by vendor", label: "Monthly resource count by vendor" },
+  { key: "chart:Headcount trend", label: "Headcount trend" },
+  { key: "chart:Monthly spend by vendor", label: "Monthly spend by vendor" },
+  { key: "chart:Terminations by year", label: "Terminations by year" },
+  { key: "chart:Upcoming expiries by month", label: "Upcoming expiries by month" },
+  { key: "chart:Split by function", label: "Split by function" },
+  { key: "chart:Split by country", label: "Split by country" },
+  { key: "chart:Renewal queue", label: "Renewal queue" },
+  { key: "uploads", label: "Upload history" },
+];
+
 const CHART_COLORS = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -258,6 +287,20 @@ function Dashboard() {
       /* ignore */
     }
   }, []);
+  const [hiddenWidgets, setHiddenWidgets] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(WIDGETS_KEY);
+      if (raw) setHiddenWidgets(JSON.parse(raw) as string[]);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const show = (key: string) => !hiddenWidgets.includes(key);
+  const updateWidgets = (next: string[]) => {
+    setHiddenWidgets(next);
+    localStorage.setItem(WIDGETS_KEY, JSON.stringify(next));
+  };
   const updateCols = (next: string[]) => {
     setCols(next);
     localStorage.setItem(COLS_KEY, JSON.stringify(next));
@@ -272,6 +315,19 @@ function Dashboard() {
         .order("sow_end_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as Contractor[];
+    },
+  });
+
+  const { data: uploads = [], refetch: refetchUploads } = useQuery({
+    queryKey: ["upload_history"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("upload_history")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data ?? [];
     },
   });
 
@@ -567,6 +623,31 @@ function Dashboard() {
               </button>
             ))}
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <LayoutGrid className="size-4" /> Widgets
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-96 w-64 overflow-y-auto">
+              <DropdownMenuLabel>Show on dashboard</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {WIDGETS.map((w) => (
+                <DropdownMenuCheckboxItem
+                  key={w.key}
+                  checked={show(w.key)}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(v) =>
+                    updateWidgets(v ? hiddenWidgets.filter((k) => k !== w.key) : [...hiddenWidgets, w.key])
+                  }
+                >
+                  {w.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => updateWidgets([])}>Show all</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={() => openRow(null)}>
             <Plus className="size-4" /> Add
           </Button>
@@ -578,6 +659,7 @@ function Dashboard() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+{show("kpi:Total") && (
           <Kpi
             label="Total"
             value={stats.total}
@@ -586,6 +668,8 @@ function Dashboard() {
             active={!hasFilters}
             onClick={clearFilters}
           />
+          )}
+{show("kpi:Active") && (
           <Kpi
             label="Active"
             value={stats.active}
@@ -594,6 +678,8 @@ function Dashboard() {
             active={f.drill?.kind === "active"}
             onClick={() => setDrill({ label: "Active", kind: "active" })}
           />
+          )}
+{show("kpi:Ending within 90 days") && (
           <Kpi
             label="Ending within 90 days"
             value={stats.in90}
@@ -602,6 +688,8 @@ function Dashboard() {
             active={f.drill?.kind === "within" && f.drill.value === "90"}
             onClick={() => setDrill({ label: "Ending within 90 days", kind: "within", value: "90" })}
           />
+          )}
+{show("kpi:Ending within 180 days") && (
           <Kpi
             label="Ending within 180 days"
             value={stats.in180}
@@ -610,6 +698,8 @@ function Dashboard() {
             active={f.drill?.kind === "within" && f.drill.value === "180"}
             onClick={() => setDrill({ label: "Ending within 180 days", kind: "within", value: "180" })}
           />
+          )}
+{show("kpi:SoW ended, still in system") && (
           <Kpi
             label="SoW ended, still in system"
             value={stats.attention}
@@ -618,6 +708,8 @@ function Dashboard() {
             active={f.drill?.kind === "attention"}
             onClick={() => setDrill({ label: "SoW ended, still in system", kind: "attention" })}
           />
+          )}
+{show("kpi:Monthly spend (active)") && (
           <Kpi
             label="Monthly spend (active)"
             value={fmtMoney(spend.total, spend.currency) + (spend.mixed ? "+" : "")}
@@ -626,9 +718,11 @@ function Dashboard() {
             active={false}
             onClick={() => setDrill({ label: "Active", kind: "active" })}
           />
+          )}
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
+{show("chart:Monthly resource count by vendor") && (
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="text-base">Monthly resource count by vendor — last 12 months</CardTitle>
@@ -665,7 +759,9 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
+{show("chart:Headcount trend") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Headcount trend — last 12 months</CardTitle>
@@ -681,7 +777,9 @@ function Dashboard() {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+)}
 
+{show("chart:Monthly spend by vendor") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Monthly spend by vendor</CardTitle>
@@ -715,7 +813,9 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
+{show("chart:Terminations by year") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Terminations by year</CardTitle>
@@ -743,7 +843,9 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
+{show("chart:Upcoming expiries by month") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Upcoming expiries by month</CardTitle>
@@ -771,7 +873,9 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
+{show("chart:Split by function") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Split by function</CardTitle>
@@ -799,7 +903,9 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
 
+{show("chart:Split by country") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Split by country</CardTitle>
@@ -833,8 +939,10 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
+)}
         </section>
 
+{show("chart:Renewal queue") && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
             <div>
@@ -912,6 +1020,7 @@ function Dashboard() {
             )}
           </CardContent>
         </Card>
+)}
 
         <section className="rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center gap-3 border-b border-border p-4">
@@ -1077,6 +1186,76 @@ function Dashboard() {
             Showing {filtered.length} of {contractors.length} records
           </div>
         </section>
+        {show("uploads") && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <History className="size-4" /> Upload history
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Every file uploaded is kept here. Download the original rows or see which conflicting values were kept.
+              </p>
+            </CardHeader>
+            <CardContent className="px-0 pb-0">
+              {uploads.length ? (
+                <div className="max-h-80 overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>When</TableHead>
+                        <TableHead>File</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Rows</TableHead>
+                        <TableHead className="text-right">Added</TableHead>
+                        <TableHead className="text-right">Updated</TableHead>
+                        <TableHead className="text-right">Conflicts</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {uploads.map((u) => (
+                        <TableRow key={u.id}>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {u.created_at.slice(0, 16).replace("T", " ")}
+                          </TableCell>
+                          <TableCell className="font-medium">{u.file_name}</TableCell>
+                          <TableCell>{u.work_type}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.row_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.inserted_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.updated_count}</TableCell>
+                          <TableCell className="text-right">
+                            {u.conflict_count > 0 ? (
+                              <Badge className="border-0 bg-amber-500/20 text-amber-700">{u.conflict_count}</Badge>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                downloadUpload(
+                                  u.file_name,
+                                  u.rows as Record<string, unknown>[],
+                                  u.overrides as Record<string, unknown>[],
+                                )
+                              }
+                            >
+                              <Download className="size-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <p className="px-6 pb-6 text-sm text-muted-foreground">No uploads yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </main>
 
       <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
@@ -1109,7 +1288,7 @@ function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onImported={() => void refetch()} />
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onImported={() => { void refetch(); void refetchUploads(); }} />
       <ContractorSheet contractor={editing} open={sheetOpen} onOpenChange={setSheetOpen} onSaved={() => void refetch()} />
     </div>
   );

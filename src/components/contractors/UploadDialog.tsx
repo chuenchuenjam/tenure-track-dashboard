@@ -24,6 +24,8 @@ const SKIP_COMPARE = new Set<keyof ContractorInput>(["renewal_count"]);
 type FieldDiff = { key: keyof ContractorInput; label: string; oldVal: unknown; newVal: unknown };
 type Conflict = { existing: Contractor; incoming: ContractorInput; diffs: FieldDiff[] };
 
+const personKey = (r: ContractorInput) =>
+  r.email?.trim() ? r.email.trim().toLowerCase() : `name:${r.name.trim().toLowerCase()}`;
 const isEmpty = (v: unknown) => v === null || v === undefined || v === "";
 const same = (a: unknown, b: unknown) =>
   typeof a === "number" || typeof b === "number"
@@ -54,8 +56,7 @@ export function UploadDialog({
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [fileName, setFileName] = useState("");
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [mode, setMode] = useState<"merge" | "replace">("merge");
-  const [workType, setWorkType] = useState<"Contractor" | "FTE">("Contractor");
+    const [workType, setWorkType] = useState<"Contractor" | "FTE">("Contractor");
   const [busy, setBusy] = useState(false);
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
   const [existingRows, setExistingRows] = useState<Contractor[]>([]);
@@ -88,100 +89,141 @@ export function UploadDialog({
   }
 
   const mapped: MappedRow[] = sheet ? mapRows(sheet.rows, mapping, workType) : [];
-  const valid = mapped.filter((r) => r.record.name);
   const problems = mapped.filter((r) => r.issues.length);
+  /** Collapse duplicate people inside the same file (same email, or same name when no email). */
+  const { valid, dupes } = (() => {
+    const byKey = new Map<string, ContractorInput>();
+    const dupes: string[] = [];
+    for (const r of mapped) {
+      if (!r.record.name) continue;
+      const k = personKey(r.record);
+      const prev = byKey.get(k);
+      if (!prev) {
+        byKey.set(k, { ...r.record });
+        continue;
+      }
+      const merged = { ...prev } as Record<string, unknown>;
+      let clash = false;
+      for (const f of FIELDS) {
+        const nv = r.record[f.key];
+        if (isEmpty(nv)) continue;
+        if (!isEmpty(merged[f.key]) && !same(merged[f.key], nv)) clash = true;
+        merged[f.key] = nv;
+      }
+      if (clash) dupes.push(r.record.name);
+      byKey.set(k, merged as ContractorInput);
+    }
+    return { valid: [...byKey.values()].map((record) => ({ record })), dupes };
+  })();
 
-  /** Step 1 (merge): look for differences against current records. */
+  function findExisting(rows: Contractor[], rec: ContractorInput) {
+    const email = rec.email?.trim().toLowerCase();
+    if (email) {
+      const hit = rows.find((e) => e.email?.trim().toLowerCase() === email);
+      if (hit) return hit;
+    }
+    const name = rec.name.trim().toLowerCase();
+    // Fall back to name only when one side has no email, to avoid merging two different people.
+    return rows.find(
+      (e) => e.name.trim().toLowerCase() === name && (!email || !e.email),
+    );
+  }
+
+  /** Step 1: look for differences against current records. */
   async function checkAndImport() {
     if (!valid.length) {
       toast.error("Nothing to import");
       return;
     }
-    if (mode === "replace") return void writeReplace();
     setBusy(true);
     const { data, error } = await supabase.from("contractors").select("*");
     setBusy(false);
     if (error) return void toast.error(error.message);
     const rows = (data ?? []) as Contractor[];
     setExistingRows(rows);
-    const byEmail = new Map(rows.filter((e) => e.email).map((e) => [e.email!.toLowerCase(), e]));
     const found: Conflict[] = [];
     for (const r of valid) {
-      const ex = r.record.email ? byEmail.get(r.record.email.toLowerCase()) : undefined;
+      const ex = findExisting(rows, r.record);
       if (!ex) continue;
       const diffs = diffRecord(ex, r.record);
       if (diffs.length) found.push({ existing: ex, incoming: r.record, diffs });
     }
     if (found.length) {
       const init: typeof choice = {};
-      for (const c of found) init[c.existing.id] = Object.fromEntries(c.diffs.map((d) => [d.key, "new"]));
+      for (const c of found) init[c.existing.id] = Object.fromEntries(c.diffs.map((d) => [d.key, "old"]));
       setChoice(init);
       setConflicts(found);
       return;
     }
-    await writeMerge(rows, {});
+    await writeMerge(rows, {}, []);
   }
 
-  async function writeReplace() {
+  async function writeMerge(rows: Contractor[], picks: typeof choice, found: Conflict[]) {
     setBusy(true);
     try {
-      const { error } = await supabase.from("contractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      if (error) throw error;
-      const { error: insErr } = await supabase.from("contractors").insert(valid.map((r) => r.record));
-      if (insErr) throw insErr;
-      done();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Import failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function writeMerge(rows: Contractor[], picks: typeof choice) {
-    setBusy(true);
-    try {
-      const byEmail = new Map(rows.filter((e) => e.email).map((e) => [e.email!.toLowerCase(), e]));
       const toInsert: ContractorInput[] = [];
+      const matched = new Set<string>();
+      let updated = 0;
       for (const r of valid) {
-        const key = r.record.email?.toLowerCase();
-        const found = key ? byEmail.get(key) : undefined;
-        if (!found) {
+        const found = findExisting(rows, r.record);
+        if (!found || matched.has(found.id)) {
           toInsert.push(r.record);
           continue;
         }
-        // Only fields with a value in the file overwrite; per-field "keep current" respected.
+        matched.add(found.id);
+        // Cumulative: only non-empty file values are applied; empty cells never wipe saved data.
         const update: Partial<ContractorInput> = {};
         for (const f of FIELDS) {
           if (f.key === "renewal_count") continue;
           const nv = r.record[f.key];
           if (isEmpty(nv)) continue;
           if (picks[found.id]?.[f.key] === "old") continue;
+          if (same(found[f.key], nv)) continue;
           (update as Record<string, unknown>)[f.key] = nv;
         }
         const finalEnd = update.sow_end_date ?? found.sow_end_date;
-        const renewed =
-          found.renewal_count + (finalEnd && found.sow_end_date && finalEnd > found.sow_end_date ? 1 : 0);
-        update.renewal_count = renewed;
+        if (finalEnd && found.sow_end_date && finalEnd > found.sow_end_date) {
+          update.renewal_count = found.renewal_count + 1;
+        }
+        if (!Object.keys(update).length) continue;
         const { error: upErr } = await supabase.from("contractors").update(update).eq("id", found.id);
         if (upErr) throw upErr;
+        updated++;
       }
       if (toInsert.length) {
         const { error: insErr } = await supabase.from("contractors").insert(toInsert);
         if (insErr) throw insErr;
       }
-      done();
+      const overrides = found.flatMap((c) =>
+        c.diffs.map((d) => ({
+          name: c.existing.name,
+          email: c.existing.email,
+          field: d.label,
+          current: d.oldVal,
+          file: d.newVal,
+          kept: picks[c.existing.id]?.[d.key] === "old" ? "current" : "file",
+        })),
+      );
+      const { error: logErr } = await supabase.from("upload_history").insert({
+        file_name: fileName,
+        work_type: workType,
+        row_count: mapped.length,
+        inserted_count: toInsert.length,
+        updated_count: updated,
+        conflict_count: found.length,
+        overrides: overrides as never,
+        rows: (sheet?.rows ?? []) as never,
+      });
+      if (logErr) console.warn("Upload history not saved", logErr);
+      toast.success(`Added ${toInsert.length}, updated ${updated}${found.length ? `, ${found.length} conflicts resolved` : ""}`);
+      onImported();
+      onOpenChange(false);
+      reset();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
       setBusy(false);
     }
-  }
-
-  function done() {
-    toast.success(`Imported ${valid.length} record${valid.length === 1 ? "" : "s"}`);
-    onImported();
-    onOpenChange(false);
-    reset();
   }
 
   const setAll = (v: "old" | "new") =>
@@ -202,7 +244,7 @@ export function UploadDialog({
           <DialogTitle>{conflicts ? "Resolve conflicts" : "Upload contractor or FTE list"}</DialogTitle>
           <DialogDescription>
             {conflicts
-              ? `${conflicts.length} existing ${conflicts.length === 1 ? "person has" : "people have"} different details in this file. Choose which value to keep.`
+              ? `${conflicts.length} existing ${conflicts.length === 1 ? "person has" : "people have"} different details in this file. Nothing changes until you pick — current values are kept by default.`
               : "Excel (.xlsx) or CSV. Check the column matching before importing."}
           </DialogDescription>
         </DialogHeader>
@@ -219,10 +261,12 @@ export function UploadDialog({
             </div>
             <div className="space-y-3">
               {conflicts.map((c) => (
-                <div key={c.existing.id} className="rounded-lg border border-border">
-                  <div className="border-b border-border bg-muted/40 px-3 py-2 text-sm">
-                    <span className="font-medium">{c.existing.name}</span>{" "}
+                <div key={c.existing.id} className="rounded-lg border border-amber-500/50">
+                  <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+                    <AlertTriangle className="size-4 text-amber-600" />
+                    <span className="font-medium">{c.existing.name}</span>
                     <span className="text-muted-foreground">{c.existing.email}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{c.diffs.length} field{c.diffs.length === 1 ? "" : "s"} differ</span>
                   </div>
                   <div className="divide-y divide-border">
                     {c.diffs.map((d) => {
@@ -259,7 +303,7 @@ export function UploadDialog({
               <Button variant="ghost" onClick={() => setConflicts(null)}>
                 <ArrowLeft className="size-4" /> Back
               </Button>
-              <Button onClick={() => writeMerge(existingRows, choice)} disabled={busy}>
+              <Button onClick={() => writeMerge(existingRows, choice, conflicts)} disabled={busy}>
                 {busy ? "Importing…" : `Import ${valid.length} records`}
               </Button>
             </div>
@@ -369,27 +413,24 @@ export function UploadDialog({
               </div>
             )}
 
-            <div>
-              <h3 className="mb-2 text-sm font-semibold">How should this be imported?</h3>
-              <RadioGroup value={mode} onValueChange={(v) => setMode(v as "merge" | "replace")} className="gap-2">
-                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
-                  <RadioGroupItem value="merge" className="mt-0.5" />
-                  <span className="text-sm">
-                    <span className="font-medium">Merge by email</span>
-                    <span className="block text-muted-foreground">
-                      Update matching people, add the new ones. You'll be asked about any conflicting values.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
-                  <RadioGroupItem value="replace" className="mt-0.5" />
-                  <span className="text-sm">
-                    <span className="font-medium">Replace everything</span>
-                    <span className="block text-muted-foreground">Delete all current records first.</span>
-                  </span>
-                </label>
-              </RadioGroup>
-            </div>
+            {dupes.length > 0 && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <p className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="size-4" />
+                  {dupes.length} person{dupes.length === 1 ? " appears" : "s appear"} more than once with different details
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {dupes.slice(0, 6).join(", ")}
+                  {dupes.length > 6 ? "…" : ""} — the last row in the file is used.
+                </p>
+              </div>
+            )}
+
+            <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Records are kept and added to over time: new people are added, matching people (by email, or by name
+              when there is no email) are updated, and empty cells never erase saved data. If saved details differ
+              from the file, you'll choose which value to keep. Every upload is saved in Upload history.
+            </p>
 
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>
